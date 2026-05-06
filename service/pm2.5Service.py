@@ -5,6 +5,7 @@ from flask_cors import CORS
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+
 load_dotenv()
 app = Flask(__name__)
 CORS(app)
@@ -14,18 +15,18 @@ API_URL =  f'https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=
 @app.route('/api/air-quality', methods=['GET'])
 def get_air_quality():
     try:
-        # 1. 向環境部發送請求
+
         response = requests.get(API_URL)
         data = response.json()
         print("目前的 API_KEY 是:", API_KEY)
         print("環境部 API 回傳的資料:", data)
-        # 2. 尋找「斗六」站的數據
+        records = data if isinstance(data, list) else data.get('records', [])
         pm25_val = 0
         temp_val = 0
         hum_val = 0
         monitor_date = ""
 
-        for item in data.get('records', []):
+        for item in records:
             if item.get('sitename') == '斗六':
                 monitor_date = item.get('monitordate')
                 item_eng = item.get('itemengname')
@@ -44,11 +45,11 @@ def get_air_quality():
                 elif item_eng == 'RH':
                     hum_val = val
 
-        # 3. 預留 AI 預測的接口 (目前先寫死一個簡單的邏輯做測試)
-        # 之後這裡就是放你 PyTorch model 推論的程式碼！
+        # 預留 AI 預測的接口 (目前先寫死一個簡單的邏輯做測試)
+        # 之後這裡就是放你 PyTorch model 推論的程式碼
         predicted_pm25 = round(pm25_val * 1.1, 1) if pm25_val else 0
 
-        # 4. 打包成乾淨的 JSON 格式回傳給前端
+        # 打包成乾淨的 JSON 格式回傳給前端
         return jsonify({
             "status": "success",
             "site": "斗六 (Douliu)",
