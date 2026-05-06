@@ -11,22 +11,27 @@ CORS(app)
 API_KEY = os.getenv("MOENV_API_KEY")
 API_URL =  f'https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=1000&sort=monitordate desc&format=JSON'
 
-@app.route('/api/air-quality', method=['GET'])
+@app.route('/api/air-quality', methods=['GET'])
 def get_air_quality():
     try:
+        # 1. 向環境部發送請求
         response = requests.get(API_URL)
         data = response.json()
+        print("目前的 API_KEY 是:", API_KEY)
+        print("環境部 API 回傳的資料:", data)
+        # 2. 尋找「斗六」站的數據
         pm25_val = 0
         temp_val = 0
         hum_val = 0
-        monitor_data = ''
+        monitor_date = ""
 
         for item in data.get('records', []):
             if item.get('sitename') == '斗六':
                 monitor_date = item.get('monitordate')
                 item_eng = item.get('itemengname')
                 val_str = item.get('concentration')
-                # 清洗無效數據
+
+                # 清洗無效數據 (例如 'x')
                 try:
                     val = float(val_str) if val_str and val_str.lower() != 'x' else 0
                 except ValueError:
@@ -60,6 +65,7 @@ def get_air_quality():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     # 啟動本地伺服器，使用 5000 port

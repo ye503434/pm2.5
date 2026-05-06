@@ -1,95 +1,169 @@
-<script>
-    // 指向你本地端的 Flask 伺服器
-    const API_URL = 'http://127.0.0.1:5000/api/air-quality';
-
-    // 建立半圓形儀表板 (Gauge) 的共用函數
-    function createGaugeChart(canvasId, maxVal, color) {
-        const ctx = document.getElementById(canvasId).getContext('2d');
-        return new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Value', 'Remaining'],
-                datasets: [{
-                    data: [0, maxVal],
-                    backgroundColor: [color, '#333333'],
-                    borderWidth: 0,
-                    circumference: 180,
-                    rotation: 270
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '80%',
-                plugins: { legend: { display: false }, tooltip: { enabled: false } },
-                animation: { animateRotate: true, animateScale: false }
-            }
-        });
-    }
-
-    const charts = {
-        pm25: createGaugeChart('pm25Chart', 100, '#4caf50'),
-        temp: createGaugeChart('tempChart', 50, '#f44336'),
-        hum: createGaugeChart('humChart', 100, '#2196f3')
-    };
-
-    function updateDashboard(data) {
-        // 解構後端傳來的乾淨資料
-        const { pm25, temperature, humidity } = data.current;
-        const updateTime = data.update_time;
-
-        // 更新 PM2.5 儀表
-        charts.pm25.data.datasets[0].data = [pm25, 100 - pm25];
-        let pm25Color = pm25 <= 35 ? '#4caf50' : (pm25 <= 53 ? '#ffeb3b' : '#f44336');
-        charts.pm25.data.datasets[0].backgroundColor[0] = pm25Color;
-        charts.pm25.update();
-        document.getElementById('pm25-val').innerText = pm25;
-        document.getElementById('pm25-val').style.color = pm25Color;
-
-        // 更新狀態文字
-        const aqiStatus = document.getElementById('aqi-status');
-        if(pm25 <= 35) { aqiStatus.innerText = 'Good'; aqiStatus.style.color = '#4caf50'; }
-        else if(pm25 <= 53) { aqiStatus.innerText = 'Moderate'; aqiStatus.style.color = '#ffeb3b'; }
-        else { aqiStatus.innerText = 'Unhealthy'; aqiStatus.style.color = '#f44336'; }
-
-        // 更新溫度儀表
-        charts.temp.data.datasets[0].data = [temperature, 50 - temperature];
-        charts.temp.update();
-        document.getElementById('temp-val').innerText = temperature;
-
-        // 更新濕度儀表
-        charts.hum.data.datasets[0].data = [humidity, 100 - humidity];
-        charts.hum.update();
-        document.getElementById('hum-val').innerText = humidity;
-
-        // 更新介面基本資訊
-        document.getElementById('site-name').innerText = data.site;
-        document.getElementById('last-update').innerText = '最後更新時間: ' + updateTime;
-    }
-
-    async function fetchData() {
-        try {
-            // 向你的 Flask 後端請求資料
-            const response = await fetch(API_URL);
-            const result = await response.json();
-
-            if (result.status === 'success') {
-                updateDashboard(result);
-                document.getElementById('system-status').innerText = 'Online';
-                document.getElementById('system-status').style.color = 'var(--color-good)';
-            } else {
-                throw new Error(result.message);
-            }
-
-        } catch (error) {
-            console.error('API 獲取失敗:', error);
-            document.getElementById('system-status').innerText = 'Offline (後端未啟動)';
-            document.getElementById('system-status').style.color = 'var(--color-unhealthy)';
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雲林縣斗六市 - 智慧空氣品質監測</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #141414;
+            --panel-bg: #1e1e1e;
+            --text-main: #ffffff;
+            --text-muted: #888888;
+            --color-good: #4caf50;
+            --color-moderate: #ffeb3b;
+            --color-unhealthy: #f44336;
         }
-    }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .header { display: flex; gap: 15px; margin-bottom: 20px; }
+        .info-box {
+            background-color: var(--panel-bg); padding: 20px; border-radius: 8px;
+            flex: 1; text-align: center; border-top: 4px solid var(--color-good);
+        }
+        .info-box h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-muted); text-transform: uppercase; }
+        .info-box p { margin: 0; font-size: 32px; font-weight: bold; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .chart-container {
+            background-color: var(--panel-bg); padding: 20px; border-radius: 8px;
+            display: flex; flex-direction: column; align-items: center; position: relative;
+        }
+        .chart-title { font-size: 14px; color: var(--text-main); margin-bottom: 10px; }
+        .canvas-wrapper { position: relative; height: 200px; width: 100%; display: flex; justify-content: center; }
+        .center-value { position: absolute; bottom: 20px; font-size: 28px; font-weight: bold; }
+        .update-time { text-align: right; color: var(--text-muted); font-size: 12px; margin-top: 15px; }
+    </style>
+</head>
+<body>
 
-    // 初次載入與定時更新 (每 5 分鐘)
-    fetchData();
-    setInterval(fetchData, 5 * 60 * 1000);
+    <div class="header">
+        <div class="info-box" id="site-box">
+            <h3>測站名稱 (SiteName)</h3>
+            <p id="site-name">載入中...</p>
+        </div>
+        <div class="info-box" id="status-box">
+            <h3>系統狀態 (Status)</h3>
+            <p id="system-status" style="color: var(--color-good)">連線中...</p>
+        </div>
+        <div class="info-box" id="aqi-box">
+            <h3>空氣品質指標 (AQI)</h3>
+            <p id="aqi-status">載入中...</p>
+        </div>
+    </div>
 
-</script>
+    <div class="dashboard-grid">
+        <div class="chart-container">
+            <div class="chart-title">RealTime PM2.5 (μg/m³)</div>
+            <div class="canvas-wrapper">
+                <canvas id="pm25Chart"></canvas>
+                <div class="center-value" id="pm25-val" style="color: var(--color-good);">--</div>
+            </div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Realtime Temperature (°C)</div>
+            <div class="canvas-wrapper">
+                <canvas id="tempChart"></canvas>
+                <div class="center-value" id="temp-val" style="color: #f44336;">--</div>
+            </div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Realtime Humidity (%)</div>
+            <div class="canvas-wrapper">
+                <canvas id="humChart"></canvas>
+                <div class="center-value" id="hum-val" style="color: #2196f3;">--</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="update-time" id="last-update">最後更新時間: --</div>
+
+    <script>
+        // 指向你本地端的 Flask 伺服器
+        const API_URL = 'http://127.0.0.1:5000/api/air-quality';
+
+        function createGaugeChart(canvasId, maxVal, color) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Value', 'Remaining'],
+                    datasets: [{
+                        data: [0, maxVal],
+                        backgroundColor: [color, '#333333'],
+                        borderWidth: 0,
+                        circumference: 180,
+                        rotation: 270
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '80%',
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    animation: { animateRotate: true, animateScale: false }
+                }
+            });
+        }
+
+        const charts = {
+            pm25: createGaugeChart('pm25Chart', 100, '#4caf50'),
+            temp: createGaugeChart('tempChart', 50, '#f44336'),
+            hum: createGaugeChart('humChart', 100, '#2196f3')
+        };
+
+        function updateDashboard(data) {
+            const { pm25, temperature, humidity } = data.current;
+            const updateTime = data.update_time;
+
+            charts.pm25.data.datasets[0].data = [pm25, 100 - pm25];
+            let pm25Color = pm25 <= 35 ? '#4caf50' : (pm25 <= 53 ? '#ffeb3b' : '#f44336');
+            charts.pm25.data.datasets[0].backgroundColor[0] = pm25Color;
+            charts.pm25.update();
+            document.getElementById('pm25-val').innerText = pm25;
+            document.getElementById('pm25-val').style.color = pm25Color;
+
+            const aqiStatus = document.getElementById('aqi-status');
+            if(pm25 <= 35) { aqiStatus.innerText = 'Good'; aqiStatus.style.color = '#4caf50'; }
+            else if(pm25 <= 53) { aqiStatus.innerText = 'Moderate'; aqiStatus.style.color = '#ffeb3b'; }
+            else { aqiStatus.innerText = 'Unhealthy'; aqiStatus.style.color = '#f44336'; }
+
+            charts.temp.data.datasets[0].data = [temperature, 50 - temperature];
+            charts.temp.update();
+            document.getElementById('temp-val').innerText = temperature;
+
+            charts.hum.data.datasets[0].data = [humidity, 100 - humidity];
+            charts.hum.update();
+            document.getElementById('hum-val').innerText = humidity;
+
+            document.getElementById('site-name').innerText = data.site;
+            document.getElementById('last-update').innerText = '最後更新時間: ' + updateTime;
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch(API_URL);
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    updateDashboard(result);
+                    document.getElementById('system-status').innerText = 'Online';
+                    document.getElementById('system-status').style.color = 'var(--color-good)';
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                console.error('API 獲取失敗:', error);
+                document.getElementById('system-status').innerText = 'Offline (請檢查後端)';
+                document.getElementById('system-status').style.color = 'var(--color-unhealthy)';
+            }
+        }
+
+        fetchData();
+        setInterval(fetchData, 5 * 60 * 1000); 
+    </script>
+</body>
+</html>
