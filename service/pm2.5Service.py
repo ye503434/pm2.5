@@ -1,11 +1,14 @@
+import os
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+load_dotenv()
 app = Flask(__name__)
 CORS(app)
-API_KEY = '432b85bb-d914-4ca0-ad89-e5d506074ce7'
+API_KEY = os.getenv("MOENV_API_KEY")
 API_URL =  f'https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=1000&sort=monitordate desc&format=JSON'
 
 @app.route('/api/air-quality', method=['GET'])
