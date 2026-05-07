@@ -31,4 +31,4 @@ jobs:
         echo '${{ secrets.FIREBASE_KEY_JSON }}' > firebase-key.json
 
     - name: Run update script
-      run: python service/firebase.py # 這裡請確認你的檔案路徑是否正確
+      run: python service/firebase.py
