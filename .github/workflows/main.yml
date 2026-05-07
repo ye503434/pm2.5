@@ -3,7 +3,7 @@ name: Hourly Air Quality Update
 on:
   schedule:
     # 這裡代表每小時的 0 分執行 (UTC 時間)
-    - cron: '0 * * * *'
+    - cron: '30 * * * *'
   workflow_dispatch: # 讓我們可以在 GitHub 網頁上手動點擊執行測試
 
 jobs:
