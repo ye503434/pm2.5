@@ -9,23 +9,15 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 
-# --- 1. 設定區：強大路徑相容性 ---
-# 這裡會自動偵測是在本機跑還是 GitHub 跑，精準定位根目錄
-current_dir = os.path.dirname(os.path.abspath(__file__))  # service 資料夾
-root_dir = os.path.dirname(current_dir)  # 專案根目錄
-
-# 將根目錄加入搜尋路徑
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
 
 # 嘗試引入大腦，如果還是找不到就嘗試加入當前工作目錄
 try:
-    from lstm_predict import predict_pm25
+    from service.lstm_predict import predict_pm25
 except ModuleNotFoundError:
     sys.path.insert(0, os.getcwd())
-    from lstm_predict import predict_pm25
+    from service.lstm_predict import predict_pm25
 
-load_dotenv(os.path.join(root_dir, '.env'))
+load_dotenv(os.path.join('../.env'))
 API_KEY = os.getenv("MOENV_API_KEY")
 API_URL = f"https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=1000&sort=monitordate desc&format=JSON"
 
@@ -34,7 +26,7 @@ DEMO_MODE = True
 # --- 2. 初始化 Firebase ---
 if not firebase_admin._apps:
     # 確保連線金鑰的路徑也是正確的 (放在根目錄)
-    cred_path = os.path.join(root_dir, 'firebase-key.json')
+    cred_path = os.path.join('../firebase-key.json')
     if not os.path.exists(cred_path):
         print(f"⚠️ 警告：找不到 {cred_path}，請確認金鑰位置。")
     cred = credentials.Certificate(cred_path)
