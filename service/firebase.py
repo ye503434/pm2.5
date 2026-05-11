@@ -1,5 +1,7 @@
 import requests
 import os
+import math
+import sys
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -7,115 +9,155 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 
-# --- 1. 系統設定與金鑰讀取 ---
+# --- 1. 設定區 ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+from lstm_predict import predict_pm25
+
 load_dotenv(os.path.join(current_dir, '../.env'))
 API_KEY = os.getenv("MOENV_API_KEY")
 API_URL = f"https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=1000&sort=monitordate desc&format=JSON"
 
-# --- 2. 初始化 Firebase ---
-cred_path = os.path.join(current_dir, '../firebase-key.json')
-if not os.path.exists(cred_path):
-    raise FileNotFoundError("找不到 firebase-key.json！")
+# 明天報告專用：如果是 True，當資料不足 24 筆時會自動用「合理假資料」補齊來做 Demo
+DEMO_MODE = True
 
-print("正在連線至 Firebase...")
+# --- 2. 初始化 Firebase ---
 if not firebase_admin._apps:
+    cred_path = os.path.join(current_dir, '../firebase-key.json')
     cred = credentials.Certificate(cred_path)
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 TARGET_STATIONS = ['斗六', '崙背', '臺西', '麥寮']
 
-# --- 3. 主程式：抓取資料並累積 ---
-def fetch_and_upload():
-    print("正在向環境部抓取最新資料...")
-    response = requests.get(API_URL)
-    if response.status_code != 200:
-        print("❌ 抓取失敗！")
-        return
 
+def fetch_and_upload():
+    print(f"🚀 啟動自動化管線 (DemoMode: {DEMO_MODE})")
+
+    # 1. 抓取 API 資料
+    response = requests.get(API_URL)
     data = response.json()
+    # 這裡修復了你遇到的 list 報錯問題！
     records = data if isinstance(data, list) else data.get('records', [])
 
     current_data_map = {}
     update_time = ""
 
-    # 解析最新一筆資料
     for item in records:
-        sitename = item.get('sitename')
-        if sitename in TARGET_STATIONS:
-            if sitename not in current_data_map:
-                current_data_map[sitename] = {"pm25": 0, "temperature": 0, "humidity": 0}
+        name = item.get('sitename')
+        if name in TARGET_STATIONS:
+            if name not in current_data_map:
+                current_data_map[name] = {"pm25": 0.0, "temp": 0.0, "rh": 0.0, "ws": 0.0, "wd": 0.0}
                 update_time = item.get('monitordate')
 
-            item_eng = item.get('itemengname')
+            eng = item.get('itemengname')
             val_str = item.get('concentration')
             try:
-                val = float(val_str) if val_str and val_str.lower() != 'x' else 0
+                if not val_str or str(val_str).strip().upper() in ['X', 'NR', 'ND']:
+                    val = 0.0
+                else:
+                    val = float(val_str)
             except ValueError:
-                val = 0
+                val = 0.0
 
-            if item_eng == 'PM2.5': current_data_map[sitename]["pm25"] = val
-            elif item_eng == 'AMB_TEMP': current_data_map[sitename]["temperature"] = val
-            elif item_eng == 'RH': current_data_map[sitename]["humidity"] = val
+            if eng == 'PM2.5':
+                current_data_map[name]["pm25"] = val
+            elif eng == 'AMB_TEMP':
+                current_data_map[name]["temp"] = val
+            elif eng == 'RH':
+                current_data_map[name]["rh"] = val
+            elif eng == 'WS_HR':
+                current_data_map[name]["ws"] = val
+            elif eng == 'WD_HR':
+                current_data_map[name]["wd"] = val
 
-    # 轉換時間格式 (例：2026-05-06 18:00 -> 05/06 18:00)
+    # 轉換時間格式供 Firebase 顯示使用
     try:
         dt_obj = datetime.strptime(update_time, "%Y-%m-%d %H:%M:%S")
         short_time = dt_obj.strftime("%m/%d %H:%M")
     except:
         short_time = update_time[5:16].replace("-", "/") if update_time else "未知時間"
 
-    # --- 核心改變：讀取 Firebase 舊資料來累積 ---
-    print("📥 正在從 Firebase 讀取歷史紀錄...")
+    # 2. 讀取 Firebase 歷史
     doc_ref = db.collection('air_quality').document('latest')
     doc_snap = doc_ref.get()
+    old_data = doc_snap.to_dict() if doc_snap.exists else {"stations_data": {}}
 
-    if doc_snap.exists:
-        old_data = doc_snap.to_dict()
-    else:
-        old_data = {"stations_data": {}} # 如果雲端是空的，就開一個全新的
+    final_upload_data = {"status": "success", "update_time": update_time, "stations_data": {}}
 
-    final_upload_data = {
-        "status": "success",
-        "update_time": update_time,
-        "stations_data": {}
-    }
-
-    # 將新資料合併到舊歷史中
     for station in TARGET_STATIONS:
-        new_current = current_data_map.get(station, {"pm25": 0, "temperature": 0, "humidity": 0})
+        s_data = current_data_map.get(station, {"pm25": 0.0, "temp": 0.0, "rh": 0.0, "ws": 0.0, "wd": 0.0})
 
-        # 拿出舊的歷史陣列 (如果沒有就生出空的)
-        old_station_data = old_data.get("stations_data", {}).get(station, {})
-        history = old_station_data.get("history", {"labels": [], "temperature": [], "pm25": []})
+        # 計算風向量
+        rad = math.radians(s_data["wd"])
+        wx = round(s_data["ws"] * math.cos(rad), 4)
+        wy = round(s_data["ws"] * math.sin(rad), 4)
 
-        # 防呆機制：檢查這個時間點是否已經寫入過？(避免你在同一個小時內按太多次執行)
+        # 拿出舊歷史陣列
+        history = old_data.get("stations_data", {}).get(station, {}).get("history", {
+            "labels": [], "pm25": [], "temperature": [], "humidity": [], "wind_x": [], "wind_y": []
+        })
+
+        # 補齊舊資料缺漏長度防呆 (確保不會因為換版造成長度不一致)
+        current_length = len(history.get("labels", []))
+        for key in ["humidity", "wind_x", "wind_y"]:
+            if key not in history or len(history[key]) < current_length:
+                history[key] = [0.0] * current_length
+
+        # ✅ 這裡補回了之前被我省略的「將最新數值加入 Firebase」邏輯
         if len(history["labels"]) > 0 and history["labels"][-1] == short_time:
-            print(f"[{station}] {short_time} 資料已存在，更新數值。")
-            history["temperature"][-1] = new_current["temperature"]
-            history["pm25"][-1] = new_current["pm25"]
+            history["temperature"][-1] = s_data["temp"]
+            history["pm25"][-1] = s_data["pm25"]
+            history["humidity"][-1] = s_data["rh"]
+            history["wind_x"][-1] = wx
+            history["wind_y"][-1] = wy
         else:
-            # 沒寫入過，把最新的真實點加到陣列最後面
             history["labels"].append(short_time)
-            history["temperature"].append(new_current["temperature"])
-            history["pm25"].append(new_current["pm25"])
+            history["temperature"].append(s_data["temp"])
+            history["pm25"].append(s_data["pm25"])
+            history["humidity"].append(s_data["rh"])
+            history["wind_x"].append(wx)
+            history["wind_y"].append(wy)
 
-        # 限制陣列長度，最多只保留過去 120 筆 (大約 5 天)
+        # 限制陣列長度 (保留約 5 天)
         if len(history["labels"]) > 120:
-            history["labels"] = history["labels"][-120:]
-            history["temperature"] = history["temperature"][-120:]
-            history["pm25"] = history["pm25"][-120:]
+            for key in ["labels", "temperature", "pm25", "humidity", "wind_x", "wind_y"]:
+                history[key] = history[key][-120:]
 
+        # 3. 準備預測數據 (取出最後 24 筆，此時已經包含剛剛加進去的最新資料)
+        h_pm25 = history["pm25"][-24:]
+        h_temp = history["temperature"][-24:]
+        h_rh = history["humidity"][-24:]
+        h_wx = history["wind_x"][-24:]
+        h_wy = history["wind_y"][-24:]
+
+        # --- 🧪 簡報 Demo 邏輯：自動補齊假資料 ---
+        if len(h_pm25) < 24 and DEMO_MODE:
+            needed = 24 - len(h_pm25)
+            h_pm25 = [s_data["pm25"]] * needed + h_pm25
+            h_temp = [s_data["temp"]] * needed + h_temp
+            h_rh = [s_data["rh"]] * needed + h_rh
+            h_wx = [wx] * needed + h_wx
+            h_wy = [wy] * needed + h_wy
+
+        # 4. 執行預測 (4個站別)
+        prediction = None
+        if len(h_pm25) == 24:
+            prediction = predict_pm25(h_pm25, h_temp, h_rh, h_wx, h_wy, station=station)
+            print(f"🔮 {station} 預測完畢: {prediction}")
+
+        # 5. 打包上傳
         final_upload_data["stations_data"][station] = {
-            "current": new_current,
-            "history": history
+            "current": {"pm25": s_data["pm25"], "temperature": s_data["temp"], "humidity": s_data["rh"], "wind_x": wx,
+                        "wind_y": wy},
+            "history": history,
+            "prediction_lstm": prediction
         }
 
-    # 寫回 Firebase
-    print("📤 正在將累積後的資料存回 Firebase...")
     doc_ref.set(final_upload_data)
-    print(f"✅ 真實歷史數據累積成功！目前累積筆數：{len(final_upload_data['stations_data']['斗六']['history']['labels'])} 筆")
+    print("✅ 全自動預測與儲存流程完成")
+
 
 if __name__ == '__main__':
     fetch_and_upload()
