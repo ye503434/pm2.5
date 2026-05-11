@@ -15,7 +15,7 @@ SEQ_LENGTH = 24  # 拿過去 24 小時的資料
 PREDICT_AHEAD = 1  # 預測未來 1 小時
 BATCH_SIZE = 64
 EPOCHS = 50  # 訓練回合數
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
 
 # 特徵順序非常重要！PM2.5 必須放在第一個 (index 0)
 FEATURES = ['PM2.5', 'AMB_TEMP', 'RH', 'Wind_X', 'Wind_Y']
