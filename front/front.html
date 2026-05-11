@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>雲林縣 - 智慧空氣品質監測戰情室</title>
-    <!-- 引入 Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -22,6 +21,7 @@
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background-color: var(--panel-bg); padding: 15px 20px; border-radius: 8px; border-left: 4px solid var(--color-pm25); }
         .title-area h2 { margin: 0; font-size: 20px; }
         .control-area select { background-color: #333; color: white; border: 1px solid #555; padding: 8px 15px; font-size: 16px; border-radius: 4px; outline: none; cursor: pointer; }
+        /* 這裡稍微調整 header 的間距以容納三個方塊 */
         .header { display: flex; gap: 15px; margin-bottom: 20px; }
         .info-box { background-color: var(--panel-bg); padding: 20px; border-radius: 8px; flex: 1; text-align: center; border-top: 4px solid var(--text-muted); }
         .info-box h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-muted); text-transform: uppercase; }
@@ -53,6 +53,7 @@
 
     <div class="header">
         <div class="info-box" id="status-box"><h3>系統狀態</h3><p id="system-status" style="color: var(--color-moderate)">連線中...</p></div>
+        <div class="info-box" id="prediction-box" style="border-top-color: var(--color-pm25);"><h3>LSTM 預報 (下一小時)</h3><p id="prediction-val" style="color: var(--color-pm25)">--</p></div>
         <div class="info-box" id="aqi-box" style="border-top-color: var(--text-muted);"><h3>空氣品質 (AQI)</h3><p id="aqi-status">載入中...</p></div>
     </div>
 
@@ -61,7 +62,7 @@
         <div class="chart-container"><div class="chart-title">即時溫度 (°C)</div><div class="canvas-wrapper"><canvas id="tempChart"></canvas><div class="center-value" id="temp-val" style="color: var(--color-temp);">--</div></div></div>
         <div class="chart-container"><div class="chart-title">即時濕度 (%)</div><div class="canvas-wrapper"><canvas id="humChart"></canvas><div class="center-value" id="hum-val" style="color: #2196f3;">--</div></div></div>
     </div>
-    
+
     <div class="history-grid">
         <div class="history-container"><canvas id="historyTempChart"></canvas></div>
         <div class="history-container"><canvas id="historyPm25Chart"></canvas></div>
@@ -69,30 +70,23 @@
 
     <div class="update-time" id="last-update">最後更新時間: --</div>
 
-    <!-- 載入 Firebase 前端 SDK (使用 ES 模組寫法) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-app.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore.js";
 
-        // TODO: Add SDKs for Firebase products that you want to use
-        // https://firebase.google.com/docs/web/setup#available-libraries
-
-        // Your web app's Firebase configuration
-        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
         const firebaseConfig = {
-        apiKey: "AIzaSyBGbxJznPUdovR-fw2zul35zhupfM9mOf0",
-        authDomain: "air-quality-77209.firebaseapp.com",
-        projectId: "air-quality-77209",
-        storageBucket: "air-quality-77209.firebasestorage.app",
-        messagingSenderId: "52021935333",
-        appId: "1:52021935333:web:b61554913269cdf5e1a80c",
-        measurementId: "G-90LJ8P5ZQC"
+            apiKey: "AIzaSyBGbxJznPUdovR-fw2zul35zhupfM9mOf0",
+            authDomain: "air-quality-77209.firebaseapp.com",
+            projectId: "air-quality-77209",
+            storageBucket: "air-quality-77209.firebasestorage.app",
+            messagingSenderId: "52021935333",
+            appId: "1:52021935333:web:b61554913269cdf5e1a80c",
+            measurementId: "G-90LJ8P5ZQC"
         };
 
-        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        // --- 以下是原本的 Chart.js 畫圖邏輯 ---
+
         let globalData = {};
         let currentStation = '斗六';
 
@@ -134,6 +128,11 @@
             const { pm25, temperature, humidity } = stationData.current;
             const history = stationData.history;
 
+            // 🎯 新增：接收 Firebase 的預測 pm2.5 欄位 (prediction_lstm)
+            const prediction = stationData.prediction_lstm;
+            const predictionText = (prediction !== null && prediction !== undefined) ? parseFloat(prediction).toFixed(1) : "--";
+            document.getElementById('prediction-val').innerText = predictionText + " μg/m³";
+
             let pm25Color = pm25 <= 35 ? 'var(--color-good)' : (pm25 <= 53 ? 'var(--color-moderate)' : 'var(--color-unhealthy)');
             charts.pm25.data.datasets[0].data = [pm25, 100 - pm25]; charts.pm25.data.datasets[0].backgroundColor[0] = pm25Color; charts.pm25.update();
             document.getElementById('pm25-val').innerText = pm25; document.getElementById('pm25-val').style.color = pm25Color;
@@ -155,10 +154,8 @@
             updateDashboardUI();
         });
 
-        // --- 核心改變：向 Firebase 拿資料，而不是向 Flask 拿 ---
         async function fetchFirebaseData() {
             try {
-                // 指向 air_quality 集合中的 latest 文件
                 const docRef = doc(db, "air_quality", "latest");
                 const docSnap = await getDoc(docRef);
 
