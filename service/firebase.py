@@ -10,34 +10,29 @@ from firebase_admin import credentials
 from firebase_admin import firestore
 
 # --- 1. 設定區：強大路徑定位 ---
-# 這是 service 資料夾的絕對路徑
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# 這是專案根目錄 (service 的上一層)
 root_dir = os.path.dirname(current_dir)
 
-# 設定 DEMO 模式
 DEMO_MODE = True
 
-# 將目前資料夾 (service) 加入搜尋路徑，確保能 import lstm_predict
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 try:
-    # 既然在同個資料夾，直接 import 檔名
+    # 🟢 同時 import LSTM 與 STGNN 的預測函式
     from lstm_predict import predict_pm25
+    from stgnn_predict import predict_stgnn
 except (ImportError, ModuleNotFoundError):
-    # 備用方案：如果上面失敗，嘗試加上路徑
     sys.path.insert(0, root_dir)
     from service.lstm_predict import predict_pm25
+    from service.stgnn_predict import predict_stgnn
 
-# 修正：使用 root_dir 拼接 .env 路徑
 load_dotenv(os.path.join(root_dir, '.env'))
 API_KEY = os.getenv("MOENV_API_KEY")
 API_URL = f"https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=1000&sort=monitordate desc&format=JSON"
 
 # --- 2. 初始化 Firebase ---
 if not firebase_admin._apps:
-    # 🎯 修正：精準定位根目錄下的 firebase-key.json
     cred_path = os.path.join(root_dir, 'firebase-key.json')
 
     if not os.path.exists(cred_path):
@@ -61,7 +56,6 @@ def fetch_and_upload():
         print(f"❌ API 請求失敗: {e}")
         return
 
-    # 處理 API 回傳格式 (字典或列表)
     try:
         records = data.get('records', [])
     except AttributeError:
@@ -102,7 +96,6 @@ def fetch_and_upload():
             elif eng == 'WD_HR':
                 current_data_map[name]["wd"] = val
 
-    # 時間轉換防呆
     if not update_time:
         print("⚠️ 警告：找不到目標站點的更新時間。")
         return
@@ -113,17 +106,18 @@ def fetch_and_upload():
     except:
         short_time = update_time[5:16].replace("-", "/")
 
-    # 讀取 Firebase
     doc_ref = db.collection('air_quality').document('latest')
     doc_snap = doc_ref.get()
     old_data = doc_snap.to_dict() if doc_snap.exists else {"stations_data": {}}
 
     final_upload_data = {"status": "success", "update_time": update_time, "stations_data": {}}
 
+    # 🟢 準備一個字典，用來一次性收集 4 個站點的資料餵給 STGNN
+    stgnn_recent_data = {}
+
     for station in TARGET_STATIONS:
         s_data = current_data_map.get(station, {"pm25": 0.0, "temp": 0.0, "rh": 0.0, "ws": 0.0, "wd": 0.0})
 
-        # 計算風向量 (統一使用四位小數比較精準)
         rad = math.radians(s_data["wd"])
         wx = round(s_data["ws"] * math.cos(rad), 4)
         wy = round(s_data["ws"] * math.sin(rad), 4)
@@ -132,13 +126,11 @@ def fetch_and_upload():
             "labels": [], "pm25": [], "temperature": [], "humidity": [], "wind_x": [], "wind_y": []
         })
 
-        # 補齊歷史長度防呆
         current_length = len(history.get("labels", []))
         for key in ["humidity", "wind_x", "wind_y"]:
             if key not in history or len(history[key]) < current_length:
                 history[key] = [0.0] * current_length
 
-        # 更新或新增歷史
         if len(history["labels"]) > 0 and history["labels"][-1] == short_time:
             history["temperature"][-1] = s_data["temp"]
             history["pm25"][-1] = s_data["pm25"]
@@ -153,19 +145,16 @@ def fetch_and_upload():
             history["wind_x"].append(wx)
             history["wind_y"].append(wy)
 
-        # 限制長度
         if len(history["labels"]) > 120:
             for key in ["labels", "pm25", "temperature", "humidity", "wind_x", "wind_y"]:
                 history[key] = history[key][-120:]
 
-        # 3. 準備預測數據
         h_pm25 = history["pm25"][-24:]
         h_temp = history["temperature"][-24:]
         h_rh = history["humidity"][-24:]
         h_wx = history["wind_x"][-24:]
         h_wy = history["wind_y"][-24:]
 
-        # Demo 模式自動補齊
         if len(h_pm25) < 24 and DEMO_MODE:
             needed = 24 - len(h_pm25)
             h_pm25 = [s_data["pm25"]] * needed + h_pm25
@@ -174,18 +163,52 @@ def fetch_and_upload():
             h_wx = [wx] * needed + h_wx
             h_wy = [wy] * needed + h_wy
 
-        prediction = None
+        # 🟢 將整理好的陣列存入 stgnn_recent_data 供後續 STGNN 使用
+        stgnn_recent_data[station] = {
+            "pm25": h_pm25,
+            "temp": h_temp,
+            "rh": h_rh,
+            "wind_x": h_wx,
+            "wind_y": h_wy
+        }
+
+        # 預測 LSTM
+        prediction_lstm = None
         if len(h_pm25) == 24:
-            prediction = predict_pm25(h_pm25, h_temp, h_rh, h_wx, h_wy, station=station)
-            print(f"🔮 {station} 預測完畢: {prediction}")
+            prediction_lstm = predict_pm25(h_pm25, h_temp, h_rh, h_wx, h_wy, station=station)
+            print(f"🔮 {station} LSTM 預測完畢: {prediction_lstm}")
 
         final_upload_data["stations_data"][station] = {
             "current": {"pm25": s_data["pm25"], "temperature": s_data["temp"], "humidity": s_data["rh"], "wind_x": wx,
                         "wind_y": wy},
             "history": history,
-            "prediction_lstm": prediction
+            "prediction_lstm": prediction_lstm
+            # STGNN 預測值稍後補上
         }
 
+    # 🟢 迴圈結束，此時我們已經收集了 4 個站的資料，開始進行 STGNN 全局預測
+    # 防呆：確保所有站點都有 24 筆資料
+    all_ready_for_stgnn = all(len(stgnn_recent_data[s]["pm25"]) == 24 for s in TARGET_STATIONS)
+
+    if all_ready_for_stgnn:
+        try:
+            stgnn_predictions = predict_stgnn(stgnn_recent_data)
+            print(f"🌐 STGNN 全局預測完畢: {stgnn_predictions}")
+
+            # 將 STGNN 預測結果塞回 Firebase 上傳字典中
+            for station in TARGET_STATIONS:
+                final_upload_data["stations_data"][station]["prediction_stgnn"] = stgnn_predictions.get(station)
+
+        except Exception as e:
+            print(f"❌ STGNN 預測發生錯誤: {e}")
+            for station in TARGET_STATIONS:
+                final_upload_data["stations_data"][station]["prediction_stgnn"] = None
+    else:
+        print("⚠️ 歷史資料筆數不足，跳過 STGNN 預測")
+        for station in TARGET_STATIONS:
+            final_upload_data["stations_data"][station]["prediction_stgnn"] = None
+
+    # 最後統一上傳到 Firebase
     doc_ref.set(final_upload_data)
     print("✅ 全自動預測與儲存流程完成")
 
