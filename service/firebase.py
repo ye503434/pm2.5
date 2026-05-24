@@ -122,12 +122,24 @@ def fetch_and_upload():
         wx = round(s_data["ws"] * math.cos(rad), 4)
         wy = round(s_data["ws"] * math.sin(rad), 4)
 
+        # 🎯 核心修改點 A：從舊資料中提取「上一小時所做出的預測值」
+        old_station_box = old_data.get("stations_data", {}).get(station, {})
+        old_lstm_pred = old_station_box.get("prediction_lstm", None)
+        old_stgnn_pred = old_station_box.get("prediction_stgnn", None)
+
+        # 如果先前無預測值（例如首度運行），則安全預設為 0.0 或當前真實值
+        old_lstm_val = old_lstm_pred if old_lstm_pred is not None else 0.0
+        old_stgnn_val = old_stgnn_pred if old_stgnn_pred is not None else 0.0
+
+        # 🎯 核心修改點 B：在 history 初始化字典中新增 'lstm' 與 'stgnn'
         history = old_data.get("stations_data", {}).get(station, {}).get("history", {
-            "labels": [], "pm25": [], "temperature": [], "humidity": [], "wind_x": [], "wind_y": []
+            "labels": [], "pm25": [], "temperature": [], "humidity": [], "wind_x": [], "wind_y": [],
+            "lstm": [], "stgnn": []
         })
 
+        # 🎯 核心修改點 C：補齊歷史長度防呆，將新加入的 lstm 與 stgnn 納入自動對齊
         current_length = len(history.get("labels", []))
-        for key in ["humidity", "wind_x", "wind_y"]:
+        for key in ["humidity", "wind_x", "wind_y", "lstm", "stgnn"]:
             if key not in history or len(history[key]) < current_length:
                 history[key] = [0.0] * current_length
 
@@ -137,6 +149,9 @@ def fetch_and_upload():
             history["humidity"][-1] = s_data["rh"]
             history["wind_x"][-1] = wx
             history["wind_y"][-1] = wy
+            # 如果是同個小時重複執行，維持覆蓋上一小時預言的對齊值
+            history["lstm"][-1] = old_lstm_val
+            history["stgnn"][-1] = old_stgnn_val
         else:
             history["labels"].append(short_time)
             history["temperature"].append(s_data["temp"])
@@ -144,9 +159,13 @@ def fetch_and_upload():
             history["humidity"].append(s_data["rh"])
             history["wind_x"].append(wx)
             history["wind_y"].append(wy)
+            # 🎯 核心修改點 D：新的一小時，將上一小時對當前的預測值正式歸檔進歷史陣列
+            history["lstm"].append(old_lstm_val)
+            history["stgnn"].append(old_stgnn_val)
 
+        # 🎯 核心修改點 E：將 'lstm' 與 'stgnn' 加入 120 筆上限截斷清單中
         if len(history["labels"]) > 120:
-            for key in ["labels", "pm25", "temperature", "humidity", "wind_x", "wind_y"]:
+            for key in ["labels", "pm25", "temperature", "humidity", "wind_x", "wind_y", "lstm", "stgnn"]:
                 history[key] = history[key][-120:]
 
         h_pm25 = history["pm25"][-24:]
@@ -163,7 +182,7 @@ def fetch_and_upload():
             h_wx = [wx] * needed + h_wx
             h_wy = [wy] * needed + h_wy
 
-        # 🟢 將整理好的陣列存入 stgnn_recent_data 供後續 STGNN 使用
+        # 將整理好的陣列存入 stgnn_recent_data 供後續 STGNN 使用
         stgnn_recent_data[station] = {
             "pm25": h_pm25,
             "temp": h_temp,
@@ -172,7 +191,7 @@ def fetch_and_upload():
             "wind_y": h_wy
         }
 
-        # 預測 LSTM
+        # 預測當前站點的 LSTM (這代表對未來「下一小時」的全新預測)
         prediction_lstm = None
         if len(h_pm25) == 24:
             prediction_lstm = predict_pm25(h_pm25, h_temp, h_rh, h_wx, h_wy, station=station)
@@ -186,8 +205,7 @@ def fetch_and_upload():
             # STGNN 預測值稍後補上
         }
 
-    # 🟢 迴圈結束，此時我們已經收集了 4 個站的資料，開始進行 STGNN 全局預測
-    # 防呆：確保所有站點都有 24 筆資料
+    # 迴圈結束，此時我們已經收集了 4 個站的資料，開始進行 STGNN 全局預測
     all_ready_for_stgnn = all(len(stgnn_recent_data[s]["pm25"]) == 24 for s in TARGET_STATIONS)
 
     if all_ready_for_stgnn:
@@ -195,7 +213,7 @@ def fetch_and_upload():
             stgnn_predictions = predict_stgnn(stgnn_recent_data)
             print(f"🌐 STGNN 全局預測完畢: {stgnn_predictions}")
 
-            # 將 STGNN 預測結果塞回 Firebase 上傳字典中
+            # 將全新的 STGNN 預測結果塞回 Firebase 上傳字典中（代表對未來下一小時的預報）
             for station in TARGET_STATIONS:
                 final_upload_data["stations_data"][station]["prediction_stgnn"] = stgnn_predictions.get(station)
 
