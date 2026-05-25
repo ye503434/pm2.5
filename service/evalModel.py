@@ -28,7 +28,7 @@ class LSTMModel(nn.Module):
 
 # --- STGNN 模型架構 ---
 class STGNN(nn.Module):
-    def __init__(self, num_nodes=4, in_features=5, gcn_out=32, lstm_hidden=64):
+    def __init__(self, num_nodes=4, in_features=5, gcn_out=64, lstm_hidden=128):
         super(STGNN, self).__init__()
         self.num_nodes = num_nodes
         self.gcn = GCNConv(in_features, gcn_out)

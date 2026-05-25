@@ -57,7 +57,7 @@ def predict_stgnn(recent_data):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # 步驟 A: 初始化並載入模型權重
-    model = STGNN(num_nodes=4, in_features=5, gcn_out=32, lstm_hidden=64).to(device)
+    model = STGNN(num_nodes=4, in_features=5, gcn_out=64, lstm_hidden=128).to(device)
     # 使用 weights_only=True 提升載入安全性 (PyTorch 建議)
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()  # 切換到評估模式

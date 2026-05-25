@@ -80,8 +80,8 @@ def main():
     OUTPUT_DIR = '.'
     SEQ_LEN = 24
     BATCH_SIZE = 32
-    EPOCHS = 20
-    LR = 0.001
+    EPOCHS = 60
+    LR = 0.0005
     
     # 檢查 GPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -173,8 +173,8 @@ def main():
     # ==========================
     num_nodes = len(en_names)
     in_features = len(features_cols)
-    gcn_out = 32
-    lstm_hidden = 64
+    gcn_out = 64
+    lstm_hidden = 128
     
     model = STGNN(num_nodes=num_nodes, in_features=in_features, gcn_out=gcn_out, lstm_hidden=lstm_hidden).to(device)
     
