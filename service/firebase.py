@@ -9,7 +9,7 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 
-# --- 1. 設定區：強大路徑定位 ---
+# 設定區：強大路徑定位
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
 
@@ -31,7 +31,7 @@ load_dotenv(os.path.join(root_dir, '.env'))
 API_KEY = os.getenv("MOENV_API_KEY")
 API_URL = f"https://data.moenv.gov.tw/api/v2/aqx_p_145?api_key={API_KEY}&limit=1000&sort=monitordate desc&format=JSON"
 
-# --- 2. 初始化 Firebase ---
+# 初始化 Firebase
 if not firebase_admin._apps:
     cred_path = os.path.join(root_dir, 'firebase-key.json')
 
@@ -112,7 +112,7 @@ def fetch_and_upload():
 
     final_upload_data = {"status": "success", "update_time": update_time, "stations_data": {}}
 
-    # 🟢 準備一個字典，用來一次性收集 4 個站點的資料餵給 STGNN
+    #準備一個字典，用來一次性收集 4 個站點的資料餵給 STGNN
     stgnn_recent_data = {}
 
     for station in TARGET_STATIONS:
@@ -122,7 +122,7 @@ def fetch_and_upload():
         wx = round(s_data["ws"] * math.cos(rad), 4)
         wy = round(s_data["ws"] * math.sin(rad), 4)
 
-        # 🎯 核心修改點 A：從舊資料中提取「上一小時所做出的預測值」
+        # 從舊資料中提取「上一小時所做出的預測值」
         old_station_box = old_data.get("stations_data", {}).get(station, {})
         old_lstm_pred = old_station_box.get("prediction_lstm", None)
         old_stgnn_pred = old_station_box.get("prediction_stgnn", None)
@@ -131,13 +131,13 @@ def fetch_and_upload():
         old_lstm_val = old_lstm_pred if old_lstm_pred is not None else 0.0
         old_stgnn_val = old_stgnn_pred if old_stgnn_pred is not None else 0.0
 
-        # 🎯 核心修改點 B：在 history 初始化字典中新增 'lstm' 與 'stgnn'
+        # 在 history 初始化字典中新增 'lstm' 與 'stgnn'
         history = old_data.get("stations_data", {}).get(station, {}).get("history", {
             "labels": [], "pm25": [], "temperature": [], "humidity": [], "wind_x": [], "wind_y": [],
             "lstm": [], "stgnn": []
         })
 
-        # 🎯 核心修改點 C：補齊歷史長度防呆，將新加入的 lstm 與 stgnn 納入自動對齊
+        # 補齊歷史長度防呆，將新加入的 lstm 與 stgnn 納入自動對齊
         current_length = len(history.get("labels", []))
         for key in ["humidity", "wind_x", "wind_y", "lstm", "stgnn"]:
             if key not in history or len(history[key]) < current_length:
@@ -159,11 +159,11 @@ def fetch_and_upload():
             history["humidity"].append(s_data["rh"])
             history["wind_x"].append(wx)
             history["wind_y"].append(wy)
-            # 🎯 核心修改點 D：新的一小時，將上一小時對當前的預測值正式歸檔進歷史陣列
+            # 新的一小時，將上一小時對當前的預測值正式歸檔進歷史陣列
             history["lstm"].append(old_lstm_val)
             history["stgnn"].append(old_stgnn_val)
 
-        # 🎯 核心修改點 E：將 'lstm' 與 'stgnn' 加入 120 筆上限截斷清單中
+        # 將 'lstm' 與 'stgnn' 加入 120 筆上限截斷清單中
         if len(history["labels"]) > 120:
             for key in ["labels", "pm25", "temperature", "humidity", "wind_x", "wind_y", "lstm", "stgnn"]:
                 history[key] = history[key][-120:]

@@ -6,9 +6,8 @@ import numpy as np
 import joblib
 
 
-# ==========================================
+
 # 1. 網路架構 (必須與訓練時完全一致)
-# ==========================================
 class STGNN(nn.Module):
     def __init__(self, num_nodes, in_features, gcn_out, lstm_hidden):
         super(STGNN, self).__init__()
@@ -35,10 +34,7 @@ class STGNN(nn.Module):
         out = self.linear(last_out)
         return out
 
-
-# ==========================================
-# 2. 推論函式
-# ==========================================
+# 推論函式
 def predict_stgnn(recent_data):
     """
     執行 STGNN 模型的推論
@@ -56,13 +52,13 @@ def predict_stgnn(recent_data):
     # 自動偵測運行設備
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # 步驟 A: 初始化並載入模型權重
+    # 初始化並載入模型權重
     model = STGNN(num_nodes=4, in_features=5, gcn_out=64, lstm_hidden=128).to(device)
     # 使用 weights_only=True 提升載入安全性 (PyTorch 建議)
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()  # 切換到評估模式
 
-    # 步驟 B: 資料提取與正規化 (建立 shape 為 [24, 4, 5] 的陣列)
+    # 資料提取與正規化 (建立 shape 為 [24, 4, 5] 的陣列)
     x_data = np.zeros((24, 4, 5))
     scalers = {}
 
@@ -79,10 +75,10 @@ def predict_stgnn(recent_data):
         # 將資料送入 Scaler 正規化，然後存入 x_data 對應的站點維度
         x_data[:, i, :] = scalers[site].transform(site_features)
 
-    # 步驟 C: 轉換為 Tensor 並增加 Batch 維度 -> [1, 24, 4, 5]
+    # 轉換為 Tensor 並增加 Batch 維度 -> [1, 24, 4, 5]
     x_tensor = torch.tensor(x_data, dtype=torch.float32).unsqueeze(0).to(device)
 
-    # 步驟 D: 建立拓撲關係圖的 edge_index
+    # 建立拓撲關係圖的 edge_index
     edge_index = torch.tensor([
         [0, 1, 1, 2, 1, 3, 2, 3],
         [1, 0, 2, 1, 3, 1, 3, 2]
@@ -109,10 +105,7 @@ def predict_stgnn(recent_data):
 
     return result
 
-
-# ==========================================
 # 3. 測試區塊 (可選)
-# ==========================================
 if __name__ == '__main__':
     # 這裡示範如何呼叫 predict_stgnn
     # 產生一組假的測試資料 (結構與你要求的格式一致)

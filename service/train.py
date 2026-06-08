@@ -5,11 +5,8 @@ import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler
 import pickle
-import os
 
-# ==========================================
-# 1. 超參數與全域設定 (Hyperparameters)
-# ==========================================
+# 超參數與全域設定 (Hyperparameters)
 DATA_FILE = '../preCleanData/clean_yunlin_air_quality_full.csv'
 SEQ_LENGTH = 24  # 拿過去 24 小時的資料
 PREDICT_AHEAD = 1  # 預測未來 1 小時
@@ -26,9 +23,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"🚀 使用運算設備: {device}")
 
 
-# ==========================================
-# 2. LSTM 模型架構 (修正 input_size=5)
-# ==========================================
+
+# LSTM 模型架構 (修正 input_size=5)
+
 class LSTMModel(nn.Module):
     def __init__(self, input_size=len(FEATURES), hidden_size=64, num_layers=2):
         super(LSTMModel, self).__init__()
@@ -44,9 +41,9 @@ class LSTMModel(nn.Module):
         return self.fc(out[:, -1, :])
 
 
-# ==========================================
-# 3. 建立時間序列視窗 (Sliding Window)
-# ==========================================
+
+# 建立時間序列視窗 (Sliding Window)
+
 def create_sequences(data, seq_length):
     xs, ys = [], []
     # 預留未來的 1 小時作為答案 (y)
@@ -59,9 +56,7 @@ def create_sequences(data, seq_length):
     return np.array(xs), np.array(ys)
 
 
-# ==========================================
-# 4. 主訓練流程
-# ==========================================
+# 主訓練流程
 def train_station_models():
     print("讀取黃金訓練資料中...")
     df = pd.read_csv(DATA_FILE)
@@ -74,7 +69,7 @@ def train_station_models():
         print(f"🏭 開始訓練測站：{station}")
         print(f"{'=' * 40}")
 
-        # 1. 萃取該測站資料
+        # 萃取該測站資料
         # 處理新舊英文名稱轉換
         station_eng_map = {'斗六': 'Douliu', '崙背': 'Lunbei', '臺西': 'Taixi', '麥寮': 'Mailiao'}
         station_data = df[df['sitename'] == station_eng_map[station]][FEATURES].values
@@ -83,7 +78,7 @@ def train_station_models():
             print(f"⚠️ {station} 資料量不足，跳過訓練！")
             continue
 
-        # 2. 正規化 (Data Scaling)
+        # 正規化 (Data Scaling)
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(station_data)
 
@@ -91,10 +86,10 @@ def train_station_models():
         with open(f'scaler_{station}.pkl', 'wb') as f:
             pickle.dump(scaler, f)
 
-        # 3. 切割 Time Windows
+        # 切割 Time Windows
         X, y = create_sequences(scaled_data, SEQ_LENGTH)
 
-        # 4. 嚴格的時間序列 Train/Test Split (前 80% 訓練，後 20% 驗證)
+        # 嚴格的時間序列 Train/Test Split (前 80% 訓練，後 20% 驗證)
         split_idx = int(len(X) * 0.8)
         X_train, y_train = X[:split_idx], y[:split_idx]
         X_test, y_test = X[split_idx:], y[split_idx:]
@@ -109,12 +104,12 @@ def train_station_models():
         train_dataset = TensorDataset(X_train_t, y_train_t)
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-        # 5. 初始化模型、損失函數、優化器
+        # 初始化模型、損失函數、優化器
         model = LSTMModel().to(device)
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-        # 6. 開始訓練迴圈
+        # 開始訓練迴圈
         for epoch in range(EPOCHS):
             model.train()
             train_loss = 0
@@ -135,7 +130,7 @@ def train_station_models():
                 print(
                     f"Epoch [{epoch + 1}/{EPOCHS}] | Train Loss(MSE): {train_loss / len(train_loader):.4f} | Test Loss: {test_loss:.4f}")
 
-        # 7. 最終評估 (還原數值，計算人類看得懂的 MAE 誤差)
+        # 最終評估 (還原數值，計算人類看得懂的 MAE 誤差)
         model.eval()
         with torch.no_grad():
             test_preds = model(X_test_t).cpu().numpy()
@@ -155,7 +150,7 @@ def train_station_models():
             print(f"\n🎯 {station} 訓練完成！")
             print(f"📊 測試集平均誤差 (MAE): 預測結果平均正負相差 {mae:.2f} μg/m³")
 
-        # 8. 儲存模型權重
+        # 儲存模型權重
         torch.save(model.state_dict(), f'lstm_{station}.pth')
         print(f"💾 模型已儲存為 lstm_{station}.pth\n")
 

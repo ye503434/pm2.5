@@ -31,7 +31,7 @@ FEATURES_COUNT = 5
 SEQ_LENGTH = 24
 
 
-# 1. 模型架構定義 (修復致命傷一：input_size 改為 5)
+# 模型架構定義 (修復致命傷一：input_size 改為 5)
 class LSTMModel(nn.Module):
     def __init__(self, input_size=FEATURES_COUNT, hidden_size=64, num_layers=2):
         super().__init__()
@@ -43,7 +43,7 @@ class LSTMModel(nn.Module):
         return self.fc(out[:, -1, :])
 
 
-# 2. 預先載入所有模型與正規化器 (避免每次預測都要重新讀取檔案)
+# 預先載入所有模型與正規化器 (避免每次預測都要重新讀取檔案)
 SUPPORTED_STATIONS = ['斗六', '崙背', '臺西', '麥寮']
 models = {}
 scalers = {}
@@ -67,14 +67,14 @@ for station in SUPPORTED_STATIONS:
         print(f"  ⚠️ 找不到 {station} 的模型檔案，請確認是否已執行 train.py")
 
 
-# 3. 核心預測函數
+# 核心預測函數
 def predict_pm25(history_pm25: list, history_temp: list, history_humidity: list,
                  history_wind_x: list, history_wind_y: list, station: str = '斗六'):
     if station not in models:
         print(f"❌ 錯誤：找不到 {station} 的模型。")
         return None
 
-    # 修復致命傷三：嚴格的長度防呆機制 (防止 API 斷線少給資料)
+    # 嚴格的長度防呆機制 (防止 API 斷線少給資料)
     lists_to_check = [history_pm25, history_temp, history_humidity, history_wind_x, history_wind_y]
     for i, lst in enumerate(lists_to_check):
         if len(lst) != SEQ_LENGTH:
@@ -98,11 +98,11 @@ def predict_pm25(history_pm25: list, history_temp: list, history_humidity: list,
     # 轉換成 PyTorch Tensor，並加上 Batch 維度 -> 形狀變成 (1, 24, 5)
     X = torch.tensor(scaled_features, dtype=torch.float32).unsqueeze(0)
 
-    # 保命符二：封印反向傳播 (省記憶體)
+    # 封印反向傳播 (省記憶體)
     with torch.no_grad():
         output_scaled = model(X).item()
 
-    # 修復致命傷二：安全的工業級反正規化 (Inverse Scaling)
+    # 安全的工業級反正規化 (Inverse Scaling)
     # 建立一個 (1, 5) 的假陣列，把預測出來的 PM2.5 放進 index 0 的位置
     dummy_array = np.zeros((1, FEATURES_COUNT))
     dummy_array[0, 0] = output_scaled
