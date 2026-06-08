@@ -9,11 +9,6 @@ import pickle
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-
-# ==========================================
-# 1. 重構模型架構 (必須與訓練完全一致)
-# ==========================================
-
 # --- LSTM 模型架構 ---
 class LSTMModel(nn.Module):
     def __init__(self, input_size=5, hidden_size=64, num_layers=2):
@@ -53,9 +48,7 @@ class STGNN(nn.Module):
         return self.linear(last_out)
 
 
-# ==========================================
-# 2. 主要評估管線流程
-# ==========================================
+# 主要評估管線流程
 def main():
     DATA_PATH = '../preCleanData/clean_yunlin_air_quality_full.csv'
     SEQ_LEN = 24
@@ -107,9 +100,9 @@ def main():
 
     print(f"📊 成功建立獨立測試集！總評估樣本數: {len(X_test_stgnn)} 小時")
 
-    # ==========================================
-    # 3. 執行 STGNN 模型推論
-    # ==========================================
+
+    # 執行 STGNN 模型推論
+
     print("\n🔮 步驟 2: 正在執行 STGNN 全局聯合預測...")
     model_stgnn = STGNN().to(device)
     stgnn_path = os.path.join(script_dir, 'stgnn_model.pth')
@@ -125,9 +118,9 @@ def main():
         stgnn_inputs = torch.tensor(X_test_stgnn, dtype=torch.float32).to(device)
         stgnn_outputs = model_stgnn(stgnn_inputs, edge_index).cpu().numpy()  # [Batch, Nodes]
 
-    # ==========================================
-    # 4. 執行 LSTM 模型推論 (分站獨立進行)
-    # ==========================================
+
+    #  執行 LSTM 模型推論 (分站獨立進行)
+
     print("🔮 步驟 3: 正在執行 LSTM 各站獨立預測...")
     lstm_outputs = np.zeros_like(stgnn_outputs)  # 用來存放 4 個站的 LSTM 預測結果
 
@@ -144,9 +137,9 @@ def main():
             lstm_inputs = torch.tensor(X_test_lstm, dtype=torch.float32).to(device)
             lstm_outputs[:, i] = model_lstm(lstm_inputs).cpu().numpy().flatten()
 
-    # ==========================================
-    # 5. 反正規化還原真實值與數據計算
-    # ==========================================
+
+    # 5反正規化還原真實值與數據計算
+
     print("🧮 步驟 4: 正在進行工業級反正規化並計算誤差指標...")
 
     metrics_summary = {}
@@ -181,9 +174,9 @@ def main():
             'STGNN_MAE': mae_stgnn, 'STGNN_RMSE': rmse_stgnn
         }
 
-    # ==========================================
-    # 6. 終端機美化輸出 Markdown 表格
-    # ==========================================
+
+    #  終端機美化輸出 Markdown 表格
+
     print("\n" + "=" * 50)
     print("📊 空氣品質模型預測表現對比報告 (獨立測試集)")
     print("=" * 50)
@@ -209,9 +202,9 @@ def main():
     ))
     print("=" * 50)
 
-    # ==========================================
-    # 7. 視覺化分組長條圖繪製
-    # ==========================================
+
+    # 視覺化分組長條圖繪製
+
     print("\n🎨 步驟 5: 正在繪製並儲存分組長條圖...")
 
     # 為了防止在某些無圖形畫面的 Linux 伺服器上報錯，使用英文字型防止中文方塊
